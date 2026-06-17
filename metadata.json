@@ -1,0 +1,6 @@
+{
+  "name": "Elozi-Graceville",
+  "description": "Elozi-Graceville is a premium multi-category retail destination bringing quality, style, and essential convenience to your doorstep.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
