@@ -1,105 +1,90 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Bot, User, HelpCircle, Loader2, Phone } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, Loader2, Phone, Lightbulb } from 'lucide-react';
 import { ChatMessage, Product } from '../types';
 
 interface AIConsultantProps {
   products: Product[];
   isOpen: boolean;
   onClose: () => void;
-  onAddProductToCart: (product: Product) => void;
 }
 
-export default function AIConsultant({
-  products,
-  isOpen,
-  onClose,
-  onAddProductToCart
-}: AIConsultantProps) {
-  // --- SET ADMIN CONTACT HERE ---
-  const ADMIN_PHONE = "+234 812 345 6789"; // Replace with her actual number
-
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: 'model',
-      content: "Hello! I am your Elozi-Graceville AI Personal Stylist. 🌸\n\nI can help you find products, check prices, or match outfits. What are you looking for today?"
-    }
-  ]);
+export default function AIConsultant({ products, isOpen, onClose }: AIConsultantProps) {
+  const ADMIN_PHONE = "+234 812 345 6789"; // Replace with real number
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // --- ALGORITHM: Personalization ---
+  // Remembers the user's favorite category based on their clicks
+  const [favCategory, setFavCategory] = useState<string | null>(localStorage.getItem('eg_fav_cat'));
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length === 0) {
+      const welcomeMsg = favCategory 
+        ? `Welcome back! Shall we look at some new arrivals in ${favCategory}? 🌸`
+        : "Hello! I'm your Elozi-Graceville Stylist. What can I help you find today?";
+      setMessages([{ role: 'model', content: welcomeMsg }]);
     }
-  }, [messages, loading]);
+  }, [favCategory]);
 
-  const handleSend = async (e?: React.FormEvent) => {
+  // --- ALGORITHM: Fuzzy Guessing ---
+  const findBestMatches = (query: string) => {
+    const q = query.toLowerCase();
+    return products.filter(p => 
+      q.includes(p.name.toLowerCase()) || 
+      p.name.toLowerCase().includes(q) ||
+      q.includes(p.category.toLowerCase()) ||
+      p.description.toLowerCase().includes(q) ||
+      // Handle common "guesses"
+      (q.includes('shue') && p.category.includes('Footwear')) ||
+      (q.includes('cloth') && p.category.includes('Apparel'))
+    );
+  };
+
+  const handleSend = async (e?: React.FormEvent, customText?: string) => {
     if (e) e.preventDefault();
-    if (!input.trim() || loading) return;
+    const userText = customText || input;
+    if (!userText.trim() || loading) return;
 
-    const userText = input.trim();
     setInput('');
-    
-    const updatedMessages = [...messages, { role: 'user' as const, content: userText }];
-    setMessages(updatedMessages);
+    setMessages(prev => [...prev, { role: 'user', content: userText }]);
     setLoading(true);
 
-    try {
-      // --- THE "STRICT" SYSTEM INSTRUCTION ---
-      const systemInstruction = `
-        You are the exclusive "Elozi-Graceville AI Stylist". 
-        Rules:
-        1. ONLY recommend products from this catalog: ${JSON.stringify(products.map(p => ({ name: p.name, price: p.price, cat: p.category })))}.
-        2. If the user asks for something absurd, unrelated to luxury/home goods, or something we don't have, politely state that it's not in our current collection.
-        3. ALWAYS end out-of-scope or "absurd" responses by saying: "For special requests or more info, please contact our administrator directly at ${ADMIN_PHONE}."
-        4. Be professional, elegant, and helpful.
-      `;
+    // Personalization: If they ask for a category, remember it
+    const words = userText.split(' ');
+    const foundCat = products.find(p => userText.toLowerCase().includes(p.category.toLowerCase()));
+    if (foundCat) {
+      localStorage.setItem('eg_fav_cat', foundCat.category);
+      setFavCategory(foundCat.category);
+    }
 
-      const response = await fetch('/api/gemini/chat', {
+    try {
+      const matched = findBestMatches(userText);
+      
+      // If Render backend is slow, we use our local "Guess" algorithm first
+      const systemInstruction = `You are the Elozi-Graceville AI. Only recommend these products: ${JSON.stringify(products.map(p => p.name))}. If asked for something else, provide admin contact: ${ADMIN_PHONE}.`;
+
+      const response = await fetch('YOUR_RENDER_BACKEND_URL/api/gemini/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: updatedMessages,
-          systemInstruction,
-          catalog: products
-        }),
+        body: JSON.stringify({ messages: [...messages, { role: 'user', content: userText }], systemInstruction })
       });
 
-      if (!response.ok) throw new Error('API Offline');
-
       const data = await response.json();
-      setMessages((prev) => [...prev, { role: 'model', content: data.response }]);
-    } catch (error) {
-      // --- DYNAMIC OFFLINE FALLBACK ---
-      setTimeout(() => {
-        const query = userText.toLowerCase();
-        
-        const matched = products.filter(p => 
-          p.name.toLowerCase().includes(query) || 
-          p.category.toLowerCase().includes(query)
-        );
-
-        let assistantReply = "";
-
-        if (matched.length > 0) {
-          assistantReply = `I found some items in our store that match your request:\n\n`;
-          matched.slice(0, 3).forEach(m => {
-            assistantReply += `🛍️ **${m.name}** - ₦${m.price.toLocaleString()}\n`;
-          });
-          assistantReply += "\nWould you like to add these to your cart?";
-        } else {
-          // Response for "Absurd" or No-Match queries
-          assistantReply = `I couldn't find any items matching "${userText}" in our current Elozi-Graceville collection.\n\nFor custom sourcing, bulk orders, or more information, please contact our administrator directly at ${ADMIN_PHONE}.`;
-        }
-
-        setMessages((prev) => [...prev, { role: 'model', content: assistantReply }]);
-      }, 800);
+      setMessages(prev => [...prev, { role: 'model', content: data.response }]);
+    } catch (err) {
+      // Local Fallback (Instant response if backend is sleeping)
+      const matched = findBestMatches(userText);
+      let reply = "";
+      if (matched.length > 0) {
+        reply = `I guessed you might be looking for these based on your request:\n\n` + 
+                matched.slice(0, 2).map(m => `✨ **${m.name}** (₦${m.price.toLocaleString()})`).join('\n') +
+                ` \n\nIs this what you had in mind?`;
+      } else {
+        reply = `I couldn't find an exact match for that in our current collection. For custom requests, please call our admin: ${ADMIN_PHONE}`;
+      }
+      setMessages(prev => [...prev, { role: 'model', content: reply }]);
     } finally {
       setLoading(false);
     }
@@ -108,67 +93,53 @@ export default function AIConsultant({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-md bg-white shadow-2xl flex flex-col border-l border-gray-100 animate-in slide-in-from-right duration-300">
-      
-      {/* Header */}
+    <div className="fixed inset-y-0 right-0 z-[60] w-full sm:max-w-md bg-white shadow-2xl flex flex-col border-l border-gray-100 animate-in slide-in-from-right duration-300">
       <div className="bg-indigo-900 p-4 text-white flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xs">EG</div>
-          <div>
-            <h3 className="font-bold text-sm tracking-tight flex items-center gap-1.5">
-              <span>EG AI Stylist</span>
-              <Sparkles size={12} className="text-indigo-300 fill-indigo-300" />
-            </h3>
-            <span className="text-[9px] text-indigo-300 uppercase tracking-widest block font-mono">Verified Store Assistant</span>
-          </div>
+          <Sparkles className="text-indigo-300 animate-pulse" size={18} />
+          <span className="font-bold text-sm">Personal Stylist</span>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"><X size={18} /></button>
+        <button onClick={onClose} className="hover:bg-white/10 p-1 rounded-full transition-colors"><X size={20} /></button>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
         {messages.map((m, idx) => (
-          <div key={idx} className={`flex gap-2.5 max-w-[90%] ${m.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
-            <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 text-white ${m.role === 'user' ? 'bg-indigo-600' : 'bg-gray-800'}`}>
+          <div key={idx} className={`flex gap-2.5 max-w-[85%] ${m.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
+            <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${m.role === 'user' ? 'bg-indigo-600' : 'bg-gray-800'} text-white`}>
               {m.role === 'user' ? <User size={14} /> : <Bot size={14} />}
             </div>
-            <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
-              m.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
-            }`}>
+            <div className={`p-3 rounded-2xl text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white border rounded-tl-none'} shadow-sm`}>
               {m.content}
-              {/* Optional: Add a call button if the message contains the phone number */}
-              {m.content.includes(ADMIN_PHONE) && (
-                <a 
-                  href={`tel:${ADMIN_PHONE}`} 
-                  className="mt-2 flex items-center gap-2 text-[10px] font-bold bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-100 w-fit"
-                >
-                  <Phone size={10} /> Call Administrator
-                </a>
-              )}
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="flex gap-2 items-center text-gray-400 text-xs italic pl-10">
-            <Loader2 size={14} className="animate-spin" />
-            <span>Consulting inventory...</span>
-          </div>
-        )}
+        {loading && <div className="text-[10px] text-gray-400 italic animate-pulse">Searching inventory...</div>}
         <div ref={scrollRef} />
       </div>
 
-      {/* Input */}
+      {/* SUGGESTION CHIPS (Algorithm-based) */}
+      <div className="p-3 bg-white border-t space-y-2">
+        <div className="flex items-center gap-1.5 text-gray-400 mb-1">
+          <Lightbulb size={12} />
+          <span className="text-[10px] font-bold uppercase tracking-tighter">Suggestions</span>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <button onClick={() => handleSend(undefined, "What's new in stock?")} className="text-[10px] whitespace-nowrap bg-gray-100 hover:bg-indigo-50 px-3 py-2 rounded-full font-bold">🔥 New Arrivals</button>
+          {favCategory && (
+             <button onClick={() => handleSend(undefined, `Show me ${favCategory}`)} className="text-[10px] whitespace-nowrap bg-indigo-50 text-indigo-700 px-3 py-2 rounded-full font-bold border border-indigo-100">✨ More {favCategory}</button>
+          )}
+          <button onClick={() => handleSend(undefined, "Surprise me with an outfit")} className="text-[10px] whitespace-nowrap bg-gray-100 px-3 py-2 rounded-full font-bold">🎲 Surprise Me</button>
+        </div>
+      </div>
+
       <form onSubmit={handleSend} className="p-4 bg-white border-t flex gap-2">
         <input
-          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask me anything about our store..."
-          className="flex-1 bg-gray-100 px-4 py-3 rounded-xl text-sm border-none focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+          placeholder="Type a guess (e.g. 'shue')..."
+          className="flex-1 bg-gray-100 px-4 py-3 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
         />
-        <button type="submit" className="p-3 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 transition-all shadow-lg shadow-indigo-200">
-          <Send size={18} />
-        </button>
+        <button className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700"><Send size={18} /></button>
       </form>
     </div>
   );
