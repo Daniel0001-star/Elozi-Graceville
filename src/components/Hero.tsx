@@ -71,7 +71,7 @@ export default function Hero({
               <span className="h-px w-8 bg-indigo-600"></span>
               <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-indigo-600 flex items-center gap-1.5">
                 <Sparkles size={11} className="text-indigo-600 animate-pulse" />
-                <span>Now AI-Infused shopping Mall</span>
+                <span>Online shopping Mall</span>
               </span>
             </div>
 
